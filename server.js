@@ -1,51 +1,48 @@
+// server.js
 import express from "express";
-import Razorpay from "razorpay";
+import cors from "cors";
 import dotenv from "dotenv";
+import Razorpay from "razorpay";
 import crypto from "crypto";
-import cors from "cors";  // ✅ Import CORS
 
 dotenv.config();
-
 const app = express();
 
-// ✅ CORS FIX
+// ✅ Apply CORS BEFORE routes
 app.use(cors({
-  origin: "https://razorpay-frontend-static.vercel.app", // your Vercel domain
+  origin: "https://razorpay-frontend-static.vercel.app",
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true
 }));
-
-// ✅ Handle preflight requests
 app.options("*", cors());
 
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// ✅ Test endpoint
+// ✅ Health Check route
 app.get("/health", (req, res) => {
-  res.send("OK");
+  res.status(200).json({ status: "ok" });
 });
 
-// ✅ Order creation endpoint
+// ✅ Main create-order route
 app.post("/create-order", async (req, res) => {
   try {
-    const razorpay = new Razorpay({
+    const instance = new Razorpay({
       key_id: process.env.RAZORPAY_KEY_ID,
       key_secret: process.env.RAZORPAY_KEY_SECRET,
     });
 
     const options = {
-      amount: req.body.amount,
+      amount: 50000, // 500 INR in paise
       currency: "INR",
-      receipt: "receipt_" + Date.now(),
+      receipt: "receipt#1",
     };
 
-    const order = await razorpay.orders.create(options);
-    res.json(order);
+    const order = await instance.orders.create(options);
+    res.status(200).json(order);
   } catch (error) {
     console.error(error);
-    res.status(500).send("Error creating order");
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
@@ -63,6 +60,11 @@ app.post("/webhook", (req, res) => {
     console.log("❌ Invalid signature");
     res.status(400).json({ status: "invalid signature" });
   }
+});
+
+// ✅ Default root route (for testing)
+app.get("/", (req, res) => {
+  res.send("Backend running 🚀");
 });
 
 const PORT = process.env.PORT || 5000;
