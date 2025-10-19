@@ -8,14 +8,17 @@ dotenv.config();
 
 const app = express();
 
-// ✅ Allow only your frontend domain
+// ✅ CORS FIX
 app.use(cors({
-  origin: "https://razorpay-frontend-static.vercel.app",
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  origin: "https://razorpay-frontend-static.vercel.app", // your Vercel domain
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true
 }));
 
-// Middleware for raw body (for webhooks)
+// ✅ Handle preflight requests
+app.options("*", cors());
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
