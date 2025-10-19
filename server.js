@@ -1,4 +1,3 @@
-// server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -6,66 +5,89 @@ import Razorpay from "razorpay";
 import crypto from "crypto";
 
 dotenv.config();
+
+if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+  console.error("❌ Missing Razorpay credentials!");
+  process.exit(1);
+}
+
 const app = express();
 
-// ✅ Apply CORS BEFORE routes
+// Dynamic CORS origins from environment variable
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || ["https://razorpay-frontend-static.vercel.app"];
+
+// CORS FIRST
 app.use(cors({
-  origin: "https://razorpay-frontend-static.vercel.app",
+  origin: allowedOrigins,
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true
 }));
 app.options("*", cors());
 
+// JSON parser
 app.use(express.json());
 
-// ✅ Health Check route
-app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok" });
+// Health
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// ✅ Main create-order route
-app.post("/create-order", async (req, res) => {
+// Root
+app.get("/", (_req, res) => {
+  res.send("🚀 Railway backend active and CORS configured!");
+});
+
+// Create order
+app.post("/create-order", async (_req, res) => {
   try {
-    const instance = new Razorpay({
+    console.log("🧾 Creating order...");
+    const rzp = new Razorpay({
       key_id: process.env.RAZORPAY_KEY_ID,
       key_secret: process.env.RAZORPAY_KEY_SECRET,
     });
-
-    const options = {
-      amount: 50000, // 500 INR in paise
+    const order = await rzp.orders.create({
+      amount: 50000, // ₹500 in paise
       currency: "INR",
-      receipt: "receipt#1",
-    };
-
-    const order = await instance.orders.create(options);
+      receipt: `receipt_${Date.now()}`,
+    });
+    console.log("✅ Order created:", order.id);
     res.status(200).json(order);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Internal Server Error" });
+  } catch (err) {
+    console.error("❌ Create order error:", err);
+    res.status(500).json({ error: "Failed to create order", details: String(err?.message || err) });
   }
 });
 
-// ✅ Webhook endpoint
+// Webhook
 app.post("/webhook", (req, res) => {
-  const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-  const shasum = crypto.createHmac("sha256", secret);
-  shasum.update(JSON.stringify(req.body));
-  const digest = shasum.digest("hex");
-
-  if (digest === req.headers["x-razorpay-signature"]) {
-    console.log("✅ Webhook verified successfully");
-    res.status(200).json({ status: "ok" });
-  } else {
-    console.log("❌ Invalid signature");
+  try {
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!secret) {
+      console.warn("⚠️ Webhook secret not set, skipping verification");
+      return res.status(200).json({ status: "ok" });
+    }
+    const h = crypto.createHmac("sha256", secret);
+    h.update(JSON.stringify(req.body));
+    const digest = h.digest("hex");
+    if (digest === req.headers["x-razorpay-signature"]) {
+      console.log("✅ Webhook verified:", req.body.event);
+      if (req.body.event === "payment.captured") {
+        console.log("💰 Payment captured:", req.body?.payload?.payment?.entity?.id);
+      }
+      return res.status(200).json({ status: "ok" });
+    }
+    console.log("❌ Invalid webhook signature");
     res.status(400).json({ status: "invalid signature" });
+  } catch (err) {
+    console.error("❌ Webhook error:", err);
+    res.status(500).json({ error: "Webhook failed" });
   }
 });
 
-// ✅ Default root route (for testing)
-app.get("/", (req, res) => {
-  res.send("Backend running 🚀");
-});
-
+// Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📍 Health: http://localhost:${PORT}/health`);
+});
