@@ -1,61 +1,66 @@
 import express from "express";
-import crypto from "crypto";
 import Razorpay from "razorpay";
 import dotenv from "dotenv";
+import crypto from "crypto";
+import cors from "cors";  // ✅ Import CORS
 
 dotenv.config();
+
 const app = express();
 
-app.get("/health", (req, res) => res.status(200).send("OK"));
+// ✅ Enable CORS for your Vercel frontend
+app.use(cors({
+  origin: "https://razorpay-frontend-static.vercel.app", // your frontend domain
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type"],
+}));
 
-app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
-  try {
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-    const signature = req.headers["x-razorpay-signature"];
-    const body = req.body;
-    const expected = crypto.createHmac("sha256", secret).update(body).digest("hex");
+// Middleware for raw body (for webhooks)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-    console.log("📬 Webhook received:", JSON.parse(body.toString()).event);
-    console.log("🔒 Signature received:", signature);
-    console.log("🧮 Signature computed:", expected);
-
-    if (signature === expected) {
-      console.log("✅ Webhook verified successfully");
-      return res.status(200).json({ status: "ok" });
-    } else {
-      console.error("❌ Signature mismatch");
-      return res.status(400).json({ error: "invalid signature" });
-    }
-  } catch (err) {
-    console.error("❌ Webhook handler error:", err);
-    return res.status(500).json({ error: "server error" });
-  }
+// ✅ Test endpoint
+app.get("/health", (req, res) => {
+  res.send("OK");
 });
 
-app.use(express.json());
-
+// ✅ Order creation endpoint
 app.post("/create-order", async (req, res) => {
   try {
-    const rzp = new Razorpay({
+    const razorpay = new Razorpay({
       key_id: process.env.RAZORPAY_KEY_ID,
       key_secret: process.env.RAZORPAY_KEY_SECRET,
     });
 
-    const { amount, currency, receipt } = req.body;
-    const order = await rzp.orders.create({
-      amount,
-      currency: currency || "INR",
-      receipt: receipt || `rcpt_${Date.now()}`,
-      payment_capture: 1,
-    });
+    const options = {
+      amount: req.body.amount,
+      currency: "INR",
+      receipt: "receipt_" + Date.now(),
+    };
 
-    res.json({ order });
-  } catch (err) {
-    console.error("create-order failed:", err);
-    res.status(500).json({ error: "create-order failed" });
+    const order = await razorpay.orders.create(options);
+    res.json(order);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Error creating order");
   }
 });
 
-app.get("/", (req, res) => res.send("Razorpay backend is running."));
+// ✅ Webhook endpoint
+app.post("/webhook", (req, res) => {
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  const shasum = crypto.createHmac("sha256", secret);
+  shasum.update(JSON.stringify(req.body));
+  const digest = shasum.digest("hex");
+
+  if (digest === req.headers["x-razorpay-signature"]) {
+    console.log("✅ Webhook verified successfully");
+    res.status(200).json({ status: "ok" });
+  } else {
+    console.log("❌ Invalid signature");
+    res.status(400).json({ status: "invalid signature" });
+  }
+});
+
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
